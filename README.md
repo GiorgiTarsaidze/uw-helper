@@ -1,3 +1,5 @@
+![License](https://img.shields.io/badge/License-Apache%202.0-yellow)
+
 This is a tiny text template picker that initally was designed for Upwork proposal messages. But I plan to develop and evolve it for other day-to-day tasks. I also plan to add variable support for templates. It works on Ubuntu (X11). It uses `rofi` for the UI and `xclip` for clipboard copy.
 
 ## Basically all it does:
