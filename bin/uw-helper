@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="uw-helper"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/${APP_NAME}"
+TEMPLATE_DIR="${CONFIG_DIR}/templates"
+ROFI_THEME_STR='window { location: north east; anchor: north east; width: 32%; x-offset: -24px; y-offset: 24px; } listview { lines: 8; fixed-height: true; }'
+
+mkdir -p "$TEMPLATE_DIR"
+
+notify() {
+  command -v notify-send >/dev/null 2>&1 && notify-send "$APP_NAME" "$1"
+}
+
+ROFI_ARGS=(-dmenu -i -theme-str "$ROFI_THEME_STR")
+
+rofi_menu() {
+  local prompt="$1"
+  shift
+  printf '%s\n' "$@" | rofi "${ROFI_ARGS[@]}" -p "$prompt"
+}
+
+rofi_input() {
+  local prompt="$1"
+  printf '' | rofi "${ROFI_ARGS[@]}" -p "$prompt"
+}
+
+load_templates() {
+  mapfile -t FILES < <(
+    cd "$TEMPLATE_DIR" && \
+    find . -type f \( -name "*.txt" -o -name "*.md" \) \
+    | sed 's|^\./||' \
+    | sort
+  )
+}
+
+pick_template() {
+  local prompt="$1"
+  load_templates
+  if [ "${#FILES[@]}" -eq 0 ]; then
+    notify "No templates found in $TEMPLATE_DIR"
+    return 1
+  fi
+  local choice
+  choice="$(printf '%s\n' "${FILES[@]}" | rofi "${ROFI_ARGS[@]}" -p "$prompt")"
+  [ -z "${choice:-}" ] && return 1
+  printf '%s\n' "$choice"
+}
+
+open_editor() {
+  local file="$1"
+  local editor="${UW_HELPER_EDITOR:-${EDITOR:-}}"
+
+  if [ -n "$editor" ]; then
+    read -r -a editor_cmd <<< "$editor"
+    "${editor_cmd[@]}" "$file"
+    return 0
+  fi
+
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$file"
+    return 0
+  fi
+
+  notify "No editor found. Set UW_HELPER_EDITOR or EDITOR."
+  return 1
+}
+
+ACTION="$(rofi_menu "$APP_NAME" "Copy template" "Edit template" "Delete template" "New template")"
+[ -z "${ACTION:-}" ] && exit 0
+
+case "$ACTION" in
+  "Copy template")
+    CHOICE="$(pick_template "Copy")" || exit 0
+    FILE_PATH="$TEMPLATE_DIR/$CHOICE"
+    if [ ! -f "$FILE_PATH" ]; then
+      notify "Template not found: $CHOICE"
+      exit 1
+    fi
+    xclip -selection clipboard < "$FILE_PATH"
+    notify "Copied: $CHOICE"
+    ;;
+  "Edit template")
+    CHOICE="$(pick_template "Edit")" || exit 0
+    FILE_PATH="$TEMPLATE_DIR/$CHOICE"
+    if [ ! -f "$FILE_PATH" ]; then
+      notify "Template not found: $CHOICE"
+      exit 1
+    fi
+    open_editor "$FILE_PATH"
+    ;;
+  "Delete template")
+    CHOICE="$(pick_template "Delete")" || exit 0
+    FILE_PATH="$TEMPLATE_DIR/$CHOICE"
+    if [ ! -f "$FILE_PATH" ]; then
+      notify "Template not found: $CHOICE"
+      exit 1
+    fi
+    CONFIRM="$(rofi_menu "Delete $CHOICE?" "Cancel" "Delete")"
+    [ "$CONFIRM" = "Delete" ] || exit 0
+    rm -f "$FILE_PATH"
+    notify "Deleted: $CHOICE"
+    ;;
+  "New template")
+    NAME="$(rofi_input "New template name")"
+    [ -z "${NAME:-}" ] && exit 0
+    if [[ "$NAME" == /* || "$NAME" == "~"* || "$NAME" == *".."* ]]; then
+      notify "Invalid template name."
+      exit 1
+    fi
+    BASE_NAME="${NAME##*/}"
+    if [[ "$BASE_NAME" != *.* ]]; then
+      NAME="${NAME}.txt"
+    fi
+    FILE_PATH="$TEMPLATE_DIR/$NAME"
+    DIR_PATH="$(dirname "$FILE_PATH")"
+    if [ "$DIR_PATH" != "$TEMPLATE_DIR" ]; then
+      mkdir -p "$DIR_PATH"
+    fi
+    if [ ! -e "$FILE_PATH" ]; then
+      touch "$FILE_PATH"
+    fi
+    open_editor "$FILE_PATH"
+    ;;
+  *)
+    exit 0
+    ;;
+esac
